@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AHNI DPT CALCULATOR</title>
+    <link rel="stylesheet" href="static/style.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <body>
+    <button id="helpBtn" title="Help">?</button>
+    <div id="helpBox" class="hidden">
+        <h3>Help Guide</h3>
+        <ul>
+            <li><strong>Reporting Period</strong>: Select the current reporting period in review.</li>
+            <li><strong>Select one list at a time</strong>: Highly Recommended.</li>
+            <li><strong>Current ART Line List</strong>: Required for processing DPT report.</li>
+            <li><strong>Previous ART Line List</strong>: Optional, help to track status change better (Restart).</li>
+            <li><strong>Baseline RADET</strong>: Optional, help in merging missing TPT data from lamis Radet.</li>
+            <li>Ensure all files are in .csv (recommended) .xlsx, or .xls format.</li>
+            <li>Click "ART LINE LIST TO DPT" to generate report.</li>
+            <br>
+            
+        <p>For any issues, contact <a href="mailto:netocodes@gmail.com">netocodes@gmail.com </a>or call +2348134453841</p>
+        </ul>
+    </div>
+    <div class="container">
+        <h1>NMRS TO AHNI DPT REPORT GENERATOR</h1>
+        <h2>Ensuring Real Time Quality and Consistent Data!</h2>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="endDate"><p>Select Reporting Period:</p></label>
+                <input type="date" id="endDate" name="endDate">
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <p>Current ART Line List For a Facility <span class="required">(Required)</span></p>
+                <input type="file" id="fileInput" name="file1" accept=".xlsx,.xls,.csv" />
+            </div>
+
+            <div class="form-group">
+                <p>Previous ART Line List (Recommended)</p>
+                <input type="file" id="fileInput2" name="file2" accept=".xlsx,.xls,.csv" />
+            </div>
+
+            <div class="form-group">
+                <p>Baseline Lamis RADET (Recommended)</p>
+                <input type="file" id="fileInput3" name="file3" accept=".xlsx,.xls,.csv" />
+            </div>
+        </div>
+
+        <div id="uploadMessage"></div>
+
+        <div class="button-group">
+            <button id="fetchData">ART LINE LIST TO DPT</button>
+        </div>
+
+        <div id="loading" class="hidden">Fetching and Analyzing data, please wait...</div>
+        <div id="message"></div>
+
+        <a id="downloadLinkgray" class="hidden" href="#" target="_blank">Download File</a>
+    </div>
+
+    <script>
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        document.getElementById('endDate').value = `${year}-${month}-${day}`;
+
+        $(document).ready(function () {
+            $("#fetchData").click(function () {
+                const fileInput1 = $("#fileInput")[0];
+                const fileInput2 = $("#fileInput2")[0];
+                const fileInput3 = $("#fileInput3")[0];
+                const file1 = fileInput1.files[0];
+                const file2 = fileInput2.files[0];
+                const file3 = fileInput3.files[0];
+                const endDate = $("#endDate").val();
+
+                if (!file1) {
+                    $("#message").text("Please select Current ART Line List Excel file.").addClass("errmessage");
+                    return;
+                }
+
+                const allowedExtensions = /(\.xlsx|\.xls|\.csv)$/i;
+                if (!allowedExtensions.exec(file1.name)) {
+                    $("#message").text("Current ART Line List must be an Excel file or csv (.xlsx, .xls or csv).").addClass("errmessage");
+                    return;
+                }
+
+                if (file2 && !allowedExtensions.exec(file2.name)) {
+                    $("#message").text("Baseline ART Line List must be an Excel file or csv (.xlsx, .xls or csv).").addClass("errmessage");
+                    return;
+                }
+
+                if (file3 && !allowedExtensions.exec(file3.name)) {
+                    $("#message").text("Radet must be an Excel file or csv (.xlsx, .xls or csv).").addClass("errmessage");
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append("file1", file1);
+                if (file2) {
+                    formData.append("file2", file2); // Only append if it exists
+                }
+                if (file3) {
+                    formData.append("file3", file3); // Only append if it exists
+                }
+                formData.append("endDate", endDate);
+
+                $("#loading").removeClass("hidden");
+                $("#message").text("");
+                $("#uploadMessage").text("");
+
+                $.ajax({
+                    url: "/fetch",
+                    type: "POST",
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function (response) {
+                        $("#loading").addClass("hidden");
+                        $("#message").text(response.message).addClass("message");
+
+                        if (response.download_url) {
+                            $("#downloadLinkgray")
+                                .attr("href", response.download_url)
+                                .removeClass("hidden")
+                                .removeClass("downloadLinkgray")
+                                .addClass("downloadLink");
+                        }
+                    },
+                    error: function () {
+                        $("#loading").addClass("hidden");
+                        $("#message").text("Error fetching and processing data.").addClass("errmessage");
+                    }
+                });
+            });
+
+        });
+
+                $("#helpBtn").click(function () {
+            $("#helpBox").toggleClass("hidden");
+        });
+    </script>
+</body>
+</html>
