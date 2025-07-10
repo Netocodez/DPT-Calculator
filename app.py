@@ -87,7 +87,7 @@ def parse_date(date):
         return pd.NaT
 
 def prepare_data(df):
-    df['DOB'] = pd.to_datetime(df['DOB'].apply(parse_date), errors='coerce')
+    df['DOB'] = pd.to_datetime(df['DOB'], errors='coerce', dayfirst=True)
     df['Age'] = (pd.to_datetime('today') - df['DOB']).dt.days / 365.25
     df['Age Band'] = pd.cut(df['Age'], bins=AGE_BINS, labels=AGE_LABELS)
     df_active = df[df['CurrentARTStatus'] == "Active"].copy()
@@ -204,6 +204,47 @@ def generate_mmd_summary(df_active):
     mmd_summary_df['Total Clients'] = mmd_summary_df.sum(axis=1)
     return mmd_summary_df
 
+def generate_tx_new_summary(df, target_date):
+    """
+    Generate a summary of clients who started ART on a specific date,
+    grouped by age band and sex.
+    """
+    # Convert the target date to a Timestamp if it's a string
+    target_date = pd.to_datetime(target_date)
+
+    # Filter clients with ARTStartDate equal to the target date
+    df_new = df[df['ARTStartDate'] == target_date].copy()
+
+    # If no clients match, return empty DataFrame with proper columns
+    if df_new.empty:
+        ordered_columns = [f"{band} Male" for band in AGE_LABELS] + \
+                          [f"{band} Female" for band in AGE_LABELS] + \
+                          ['Total Clients']
+        return pd.DataFrame([[''] * len(ordered_columns)], columns=ordered_columns, index=['Tx_New'])
+
+    # Group by age band and sex
+    male = df_new[df_new['Sex'] == 'M'].groupby('Age Band').size().reindex(AGE_LABELS, fill_value=0)
+    female = df_new[df_new['Sex'] == 'F'].groupby('Age Band').size().reindex(AGE_LABELS, fill_value=0)
+
+    # Rename columns
+    male = male.rename(lambda x: f"{x} Male")
+    female = female.rename(lambda x: f"{x} Female")
+
+    # Combine male and female counts
+    row = pd.concat([male, female])
+    row['Total Clients'] = row.sum()
+
+    # Create the final summary DataFrame
+    summary_df = pd.DataFrame([row], index=['Tx_New'])
+
+    # Ensure consistent column order
+    ordered_columns = [f"{band} Male" for band in AGE_LABELS] + \
+                      [f"{band} Female" for band in AGE_LABELS] + \
+                      ['Total Clients']
+    summary_df = summary_df[ordered_columns]
+
+    return summary_df
+
 def write_excel(dataframes, filename, title):
     wb = Workbook()
     ws = wb.active
@@ -302,20 +343,30 @@ def fetch_data():
 
         for col in DATE_COLUMNS:
             if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors='coerce')
+                df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
         for col in NUMERIC_COLUMNS:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
         end_date = pd.to_datetime(end_date)
-        formatted_period = end_date.to_period('M').strftime('%B %Y')
+        formatted_period = end_date.strftime('%d %B %Y')
 
         df_clean = prepare_data(df)
         tcs_summary = generate_tcs1_summary(df_clean)
         mmd_summary = generate_mmd_summary(df_clean)
+        tx_new_summary = generate_tx_new_summary(df_clean, end_date)
+        
+        # Extract unique facility names as a list
+        unique_facilities = df['FacilityName'].unique()
+        facilities_text = ', '.join(unique_facilities)
+        print(facilities_text)
 
         filename = f"DPT SUMMARY AS AT {formatted_period}.xlsx"
-        write_excel({"TCS1 Summary": tcs_summary, "MMD Summary": mmd_summary}, filename, f"Summary as at {formatted_period}")
+        write_excel({
+            "Tx New Summary (No. 77)": tx_new_summary,
+            "TCS1 Summary (No. 82)": tcs_summary,
+            "MMD Summary (No. 90)": mmd_summary
+        }, filename, f"{facilities_text} DPT Summary as at {formatted_period}")
 
         return jsonify({"message": "Report generated successfully!", "download_url": "/download"}), 200
 
