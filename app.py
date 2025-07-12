@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 # =========================
 # CONSTANTS
 # =========================
-DATE_COLUMNS = ['DOB', 'ARTStartDate', 'Pharmacy_LastPickupdate', 'DateResultReceivedFacility',
+DATE_COLUMNS = ['DOB', 'ARTStartDate', 'Pharmacy_LastPickupdate', 'DateResultReceivedFacility', 'LastDateOfSampleCollection',
                 'Date_Transfered_In', 'Outcomes_Date', 'DateofCurrent_TBStatus', 'First_TPT_Pickupdate']
 NUMERIC_COLUMNS = ['DaysOfARVRefill', 'CurrentViralLoad']
 AGE_BINS = [0, 0.99, 4, 9, 14, 19, 24, 29, 34, 39, 44, 49, float('inf')]
@@ -47,7 +47,7 @@ MMD_MAP = dict(zip(MMD_COLS, MMD_LABELS))
 #columns to process
 columns_to_read = [
     'State', 'LGA', 'FacilityName', 'PatientHospitalNo', 'PEPID', 'uuid', 'ARTStatus_PreviousQuarter','CurrentARTStatus', 'DOB', 'ARTStartDate', 'Pharmacy_LastPickupdate',
-    'DateResultReceivedFacility', 'Date_Transfered_In',
+    'DateResultReceivedFacility', 'LastDateOfSampleCollection', 'Date_Transfered_In',
     'CurrentPregnancyStatus', 'First_TPT_Pickupdate', 'Current_TPT_Received', 'Current_TB_Status', 'CurrentRegimenLine',
     'DaysOfARVRefill', 'DSD_Model', 'Sex', 'Outcomes_Date', 'CurrentViralLoad', 'ViralLoadIndication', 'DateofCurrent_TBStatus'
 ]
@@ -204,46 +204,50 @@ def generate_mmd_summary(df_active):
     mmd_summary_df['Total Clients'] = mmd_summary_df.sum(axis=1)
     return mmd_summary_df
 
-def generate_tx_new_summary(df, target_date):
+def generate_summary_by_date(df, target_date, date_column, label='Summary'):
     """
-    Generate a summary of clients who started ART on a specific date,
+    Generate a summary of clients whose specified date column matches the target date,
     grouped by age band and sex.
+    
+    Parameters:
+        df: DataFrame containing the data.
+        target_date: The specific date to filter on.
+        date_column: The column to compare with the target date.
+        label: Label for the resulting summary row (default: 'Summary').
     """
-    # Convert the target date to a Timestamp if it's a string
     target_date = pd.to_datetime(target_date)
 
-    # Filter clients with ARTStartDate equal to the target date
-    df_new = df[df['ARTStartDate'] == target_date].copy()
+    # Filter the DataFrame by the given date column
+    df_filtered = df[df[date_column] == target_date].copy()
 
-    # If no clients match, return empty DataFrame with proper columns
-    if df_new.empty:
+    # If no clients match, return an empty row with correct columns
+    if df_filtered.empty:
         ordered_columns = [f"{band} Male" for band in AGE_LABELS] + \
                           [f"{band} Female" for band in AGE_LABELS] + \
                           ['Total Clients']
-        return pd.DataFrame([[''] * len(ordered_columns)], columns=ordered_columns, index=['Tx_New'])
+        return pd.DataFrame([[''] * len(ordered_columns)], columns=ordered_columns, index=[label])
 
     # Group by age band and sex
-    male = df_new[df_new['Sex'] == 'M'].groupby('Age Band').size().reindex(AGE_LABELS, fill_value=0)
-    female = df_new[df_new['Sex'] == 'F'].groupby('Age Band').size().reindex(AGE_LABELS, fill_value=0)
+    male = df_filtered[df_filtered['Sex'] == 'M'].groupby('Age Band').size().reindex(AGE_LABELS, fill_value=0)
+    female = df_filtered[df_filtered['Sex'] == 'F'].groupby('Age Band').size().reindex(AGE_LABELS, fill_value=0)
 
     # Rename columns
     male = male.rename(lambda x: f"{x} Male")
     female = female.rename(lambda x: f"{x} Female")
 
-    # Combine male and female counts
+    # Combine and compute total
     row = pd.concat([male, female])
     row['Total Clients'] = row.sum()
 
-    # Create the final summary DataFrame
-    summary_df = pd.DataFrame([row], index=['Tx_New'])
-
-    # Ensure consistent column order
+    # Final summary DataFrame
     ordered_columns = [f"{band} Male" for band in AGE_LABELS] + \
                       [f"{band} Female" for band in AGE_LABELS] + \
                       ['Total Clients']
+    summary_df = pd.DataFrame([row], index=[label])
     summary_df = summary_df[ordered_columns]
 
     return summary_df
+
 
 def write_excel(dataframes, filename, title):
     wb = Workbook()
@@ -354,7 +358,10 @@ def fetch_data():
         df_clean = prepare_data(df)
         tcs_summary = generate_tcs1_summary(df_clean)
         mmd_summary = generate_mmd_summary(df_clean)
-        tx_new_summary = generate_tx_new_summary(df_clean, end_date)
+        tx_new_summary = generate_summary_by_date(df_clean, end_date, 'ARTStartDate', label='Tx_New')
+        trans_in_summary = generate_summary_by_date(df_clean, end_date, 'Date_Transfered_In', label='Transfer In')
+        Sample_Collection_Summary = generate_summary_by_date(df_clean, end_date, 'LastDateOfSampleCollection', label='Sample_Collection')
+        VL_Result_Summary = generate_summary_by_date(df_clean, end_date, 'DateResultReceivedFacility', label='VL_Result')
         
         # Extract unique facility names as a list
         unique_facilities = df['FacilityName'].unique()
@@ -363,9 +370,13 @@ def fetch_data():
 
         filename = f"DPT SUMMARY AS AT {formatted_period}.xlsx"
         write_excel({
-            "Tx New Summary (No. 77)": tx_new_summary,
-            "TCS1 Summary (No. 82)": tcs_summary,
-            "MMD Summary (No. 90)": mmd_summary
+            "GF_Newly Started on ART (ALL)	 (No. 77)": tx_new_summary,
+            "GF_Number of PLHIV who were TRANSFERRED IN (No. 80)": trans_in_summary,
+            "GF_Number of Adults And Children Currently Receiving Antiretroviral Therapy (ART) (No. 82)": tcs_summary,
+            "GF_Number of Viral Load Samples Collected Today (No. 84)": Sample_Collection_Summary,
+            "GF_Number of Viral Load Result Received - Daily (No. 86)": VL_Result_Summary,
+            "GF_Number of Adults And Children Currently Receiving Antiretroviral Therapy (ART)_MMD (No. 90)": mmd_summary
+            
         }, filename, f"{facilities_text} DPT Summary as at {formatted_period}")
 
         return jsonify({"message": "Report generated successfully!", "download_url": "/download"}), 200
