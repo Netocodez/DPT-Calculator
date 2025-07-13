@@ -167,7 +167,6 @@ def process_emr_data(df, dfbaseline, emr_df):
         how='left',
         suffixes=('', '_baseline')
     )
-    #df.to_excel('df.xlsx')
 
     # Fill missing TPT values
     df['Date of TPT Start (yyyy-mm-dd)'] = pd.to_datetime(df['Date of TPT Start (yyyy-mm-dd)'], errors='coerce', dayfirst=True)
@@ -203,6 +202,61 @@ def generate_mmd_summary(df_active):
     mmd_summary_df = mmd_summary_df.reindex(columns=ordered_columns, fill_value=0)
     mmd_summary_df['Total Clients'] = mmd_summary_df.sum(axis=1)
     return mmd_summary_df
+
+def generate_loss_summary_by_day(df, target_date):
+    """
+    Generate summary of losses (Death, TO, LTFU, DC) by age band and sex for a specific day.
+    """
+    # Step 1: Clean and calculate next appointment and IIT
+    df['Pharmacy_LastPickupdate2'] = pd.to_datetime(df['Pharmacy_LastPickupdate'], errors='coerce', dayfirst=True).fillna(pd.to_datetime('1900'))
+    df['DaysOfARVRefill2'] = pd.to_numeric(df['DaysOfARVRefill'], errors='coerce').fillna(0)
+    df['DaysOfARVRefill2'] = df['DaysOfARVRefill2'].apply(lambda x: 0 if x > 180 else x)
+    df['NextAppt'] = df['Pharmacy_LastPickupdate2'] + pd.to_timedelta(df['DaysOfARVRefill2'], unit='D')
+    df['IITDate2'] = df['NextAppt'] + pd.Timedelta(days=29)
+
+    # Step 2: Determine Losses date
+    df['Losses date'] = pd.to_datetime(df['Outcomes_Date'], errors='coerce', dayfirst=True)
+    df['Losses date'] = df['Losses date'].fillna(df['IITDate2'])
+    df['Losses date'] = pd.to_datetime(df['Losses date'], errors='coerce', dayfirst=True)
+
+    # Step 3: Filter by specific day and loss status
+    target_date = pd.to_datetime(target_date)
+    losses_df = df[
+        df['CurrentARTStatus'].isin(["Death", "Transferred out", "LTFU", "Discontinued Care"]) &
+        (df['Losses date'].dt.date == target_date.date())
+    ].copy()
+
+    # Return empty shell if none found
+    if losses_df.empty:
+        ordered_columns = [f"{band} Male" for band in AGE_LABELS] + \
+                          [f"{band} Female" for band in AGE_LABELS] + ['Total']
+        return pd.DataFrame([[''] * len(ordered_columns)], columns=ordered_columns, index=['No Losses'])
+
+    # Step 4: Assign categories and define custom order
+    losses_df['Loss Type'] = losses_df['CurrentARTStatus']
+    loss_order = ["Death", "Transferred out", "Discontinued Care", "LTFU"]
+
+    result_frames = []
+    for loss_type in loss_order:
+        df_type = losses_df[losses_df['Loss Type'] == loss_type]
+        if df_type.empty:
+            # Include the loss type even if it's 0 across the board
+            male = pd.Series(0, index=AGE_LABELS).rename(lambda x: f"{x} Male")
+            female = pd.Series(0, index=AGE_LABELS).rename(lambda x: f"{x} Female")
+        else:
+            male = df_type[df_type['Sex'] == 'M'].groupby('Age Band').size().reindex(AGE_LABELS, fill_value=0)
+            female = df_type[df_type['Sex'] == 'F'].groupby('Age Band').size().reindex(AGE_LABELS, fill_value=0)
+            male = male.rename(lambda x: f"{x} Male")
+            female = female.rename(lambda x: f"{x} Female")
+
+        row = pd.concat([male, female])
+        row['Total'] = row.sum()
+        result_frames.append(pd.DataFrame([row], index=[loss_type]))
+
+    final_df = pd.concat(result_frames)
+    final_df = final_df[[f"{band} Male" for band in AGE_LABELS] + [f"{band} Female" for band in AGE_LABELS] + ['Total']]
+    return final_df
+
 
 def generate_summary_by_date(df, target_date, date_column, label='Summary'):
     """
@@ -274,6 +328,10 @@ def write_excel(dataframes, filename, title):
         start_row += 1
 
         # Data rows
+        row_idx = start_row - 1  # always initialized   
+        if df.empty:
+            ws.cell(row=start_row, column=1, value="No data available")
+            return start_row + 2     
         for row_idx, (index, row) in enumerate(df.iterrows(), start=start_row):
             ws.cell(row=row_idx, column=1).value = index
             for col_idx, value in enumerate(row, 2):
@@ -362,6 +420,7 @@ def fetch_data():
         trans_in_summary = generate_summary_by_date(df_clean, end_date, 'Date_Transfered_In', label='Transfer In')
         Sample_Collection_Summary = generate_summary_by_date(df_clean, end_date, 'LastDateOfSampleCollection', label='Sample_Collection')
         VL_Result_Summary = generate_summary_by_date(df_clean, end_date, 'DateResultReceivedFacility', label='VL_Result')
+        loss_summary = generate_loss_summary_by_day(df, end_date)
         
         # Extract unique facility names as a list
         unique_facilities = df['FacilityName'].unique()
@@ -375,6 +434,7 @@ def fetch_data():
             "GF_Number of Adults And Children Currently Receiving Antiretroviral Therapy (ART) (No. 82)": tcs_summary,
             "GF_Number of Viral Load Samples Collected Today (No. 84)": Sample_Collection_Summary,
             "GF_Number of Viral Load Result Received - Daily (No. 86)": VL_Result_Summary,
+            "GF_No Clinical Contacts Since their Last Expected Contact (No. 89)": loss_summary,
             "GF_Number of Adults And Children Currently Receiving Antiretroviral Therapy (ART)_MMD (No. 90)": mmd_summary
             
         }, filename, f"{facilities_text} DPT Summary as at {formatted_period}")
