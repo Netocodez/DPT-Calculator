@@ -85,10 +85,27 @@ def parse_date(date):
         return parser.parse(str(date), fuzzy=True, ignoretz=True)
     except:
         return pd.NaT
+    
+ #function to calculate current age and mirror excel datedif function
+def calculate_age_vectorized(df, dob_col='DOB', ref_date=None):
+    # ✅ pick the reference date
+    if ref_date is None:
+        today = pd.Timestamp.today().normalize()  # current day
+    else:
+        today = pd.to_datetime(ref_date)
 
-def prepare_data(df):
+    # ✅ fully vectorized age calculation
+    dob = df[dob_col]
+    age = (today.year - dob.dt.year 
+        - ((dob.dt.month > today.month) | 
+            ((dob.dt.month == today.month) & (dob.dt.day > today.day))).astype(int))
+
+    return age
+
+def prepare_data(df, end_date):
     df['DOB'] = pd.to_datetime(df['DOB'], errors='coerce', dayfirst=True)
-    df['Age'] = (pd.to_datetime('today') - df['DOB']).dt.days / 365.25
+    #df['Age'] = (pd.to_datetime('today') - df['DOB']).dt.days / 365.25
+    df['Age'] = calculate_age_vectorized(df, 'DOB', ref_date=end_date)
     df['Age Band'] = pd.cut(df['Age'], bins=AGE_BINS, labels=AGE_LABELS)
     df_active = df[df['CurrentARTStatus'] == "Active"].copy()
     df_active['TCS1'] = 1
@@ -413,7 +430,7 @@ def fetch_data():
         end_date = pd.to_datetime(end_date)
         formatted_period = end_date.strftime('%d %B %Y')
 
-        df_clean = prepare_data(df)
+        df_clean = prepare_data(df, end_date)
         tcs_summary = generate_tcs1_summary(df_clean)
         mmd_summary = generate_mmd_summary(df_clean)
         tx_new_summary = generate_summary_by_date(df_clean, end_date, 'ARTStartDate', label='Tx_New')
