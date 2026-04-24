@@ -32,7 +32,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 DATE_COLUMNS = ['DOB', 'ARTStartDate', 'Pharmacy_LastPickupdate', 'DateResultReceivedFacility', 'LastDateOfSampleCollection',
                 'Date_Transfered_In', 'Outcomes_Date', 'DateofCurrent_TBStatus', 'First_TPT_Pickupdate']
 NUMERIC_COLUMNS = ['DaysOfARVRefill', 'CurrentViralLoad']
-AGE_BINS = [0, 0.99, 4, 9, 14, 19, 24, 29, 34, 39, 44, 49, float('inf')]
+AGE_BINS = [-1, 0, 4, 9, 14, 19, 24, 29, 34, 39, 44, 49, float('inf')]
 AGE_LABELS = ['<1', '1-4', '5-9', '10-14', '15-19', '20-24', '25-29', '30-34', '35-39', '40-44', '45-49', '50+']
 REGIMEN_MAP = {
     'Adult 1st line ARV regimen': '1st Line', 'Child 1st line ARV regimen': '1st Line',
@@ -86,7 +86,7 @@ def parse_date(date):
     except:
         return pd.NaT
     
- #function to calculate current age and mirror excel datedif function
+#function to calculate current age and mirror excel datedif function
 def calculate_age_vectorized(df, dob_col='DOB', ref_date=None):
     # ✅ pick the reference date
     if ref_date is None:
